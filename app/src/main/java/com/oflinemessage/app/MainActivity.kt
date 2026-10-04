@@ -1,5 +1,6 @@
 package com.offlinemessage.app
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -14,19 +15,22 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
+    private lateinit var deviceListText: TextView
     private lateinit var pttButton: Button
+    private lateinit var btnScan: Button
+    private lateinit var btnMakeDiscoverable: Button
 
-    // Launcher to request multiple runtime permissions together
+    private lateinit var bluetoothManager: LocalBluetoothManager
+    private val discoveredDevicesList = mutableListOf()
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.entries.all { it.value }
         if (allGranted) {
-            statusText.text = "All required permissions granted!\nReady to discover devices."
-            Toast.makeText(this, "Permissions Granted", Toast.LENGTH_SHORT).show()
+            statusText.text = "Permissions granted!\nReady to scan for nearby devices."
         } else {
-            statusText.text = "Permissions denied.\nApp cannot function offline without permissions."
-            Toast.makeText(this, "Permissions Required", Toast.LENGTH_LONG).show()
+            statusText.text = "Permissions denied.\nCannot discover nearby devices without permissions."
         }
     }
 
@@ -35,19 +39,69 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         statusText = findViewById(R.id.statusText)
+        deviceListText = findViewById(R.id.deviceListText)
         pttButton = findViewById(R.id.pttButton)
+        btnScan = findViewById(R.id.btnScan)
+        btnMakeDiscoverable = findViewById(R.id.btnMakeDiscoverable)
 
-        pttButton.setOnClickListener {
+        bluetoothManager = LocalBluetoothManager(this)
+
+        btnScan.setOnClickListener {
             if (hasAllPermissions()) {
-                statusText.text = "Voice button pressed (Permissions OK)"
+                startBluetoothDiscovery()
             } else {
-                statusText.text = "Please grant permissions first."
                 checkAndRequestPermissions()
             }
         }
 
-        // Prompt for permissions immediately upon launching
+        btnMakeDiscoverable.setOnClickListener {
+            if (hasAllPermissions()) {
+                bluetoothManager.makeDiscoverable(300)
+                Toast.makeText(this, "Phone is visible to nearby devices for 5 minutes", Toast.LENGTH_SHORT).show()
+            } else {
+                checkAndRequestPermissions()
+            }
+        }
+
+        pttButton.setOnClickListener {
+            if (hasAllPermissions()) {
+                statusText.text = "Voice button pressed"
+            } else {
+                checkAndRequestPermissions()
+            }
+        }
+
         checkAndRequestPermissions()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startBluetoothDiscovery() {
+        if (!bluetoothManager.isBluetoothSupported) {
+            Toast.makeText(this, "Bluetooth not supported on this device", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        statusText.text = "Scanning for nearby Bluetooth devices..."
+        discoveredDevicesList.clear()
+        deviceListText.text = "Scanning..."
+
+        bluetoothManager.startDiscovery { device ->
+            val deviceName = device.name ?: "Unknown Device"
+            val deviceAddress = device.address
+            val entry = "\(deviceName (\)deviceAddress)"
+
+            if (!discoveredDevicesList.contains(entry)) {
+                discoveredDevicesList.add(entry)
+                runOnUiThread {
+                    deviceListText.text = discoveredDevicesList.joinToString("\n")
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        bluetoothManager.stopDiscovery()
     }
 
     private fun getRequiredPermissions(): Array {
@@ -56,14 +110,12 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.RECORD_AUDIO
         )
 
-        // Android 12 (API 31) and higher require dedicated Bluetooth & Nearby permissions
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             permissions.add(Manifest.permission.BLUETOOTH_SCAN)
             permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
             permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
         }
 
-        // Android 13 (API 33) and higher require Nearby Wi-Fi permission for Wi-Fi Direct
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
@@ -79,10 +131,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkAndRequestPermissions() {
         if (!hasAllPermissions()) {
-            statusText.text = "Requesting permissions..."
+            statusText.text = "Requesting required permissions..."
             requestPermissionLauncher.launch(getRequiredPermissions())
         } else {
-            statusText.text = "All required permissions granted!\nReady to discover devices."
+            statusText.text = "All required permissions granted!\nReady to scan for nearby devices."
         }
     }
 }
